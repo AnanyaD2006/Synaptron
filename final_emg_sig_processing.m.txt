@@ -1,0 +1,140 @@
+function [emg_env, fs, t] = preprocess_emg_live()
+
+clear; clc; close all;
+
+%% =========================================================
+%% SERIAL CONNECTION
+%% =========================================================
+
+port = "COM14";      % Change if needed
+baud = 115200;
+
+s = serialport(port,baud);
+configureTerminator(s,"LF");
+
+pause(2);
+
+disp("Receiving live EMG data...");
+
+%% =========================================================
+%% PARAMETERS
+%% =========================================================
+
+fs = 250;              % sampling rate (must match Arduino timing)
+duration = 10;          % seconds to record
+
+N = fs * duration;
+
+emg = zeros(N,1);
+
+%% =========================================================
+%% READ LIVE DATA FROM ARDUINO
+%% =========================================================
+
+for i = 1:N
+
+    val = readline(s);        % read serial line
+    emg(i) = str2double(val); % convert string → number
+
+end
+
+clear s
+
+t = (0:N-1)/fs;
+
+%% =========================================================
+%% CONVERT ADC TO mV
+%% =========================================================
+
+emg = (emg/1023)*5000;   % convert ADC to mV
+
+%% =========================================================
+%% DC REMOVAL
+%% =========================================================
+
+emg = emg - mean(emg);
+
+%% =========================================================
+%% BANDPASS FILTER
+%% =========================================================
+
+lowCut = 25;
+highCut = 150;
+
+[b,a] = butter(4,[lowCut highCut]/(fs/2),'bandpass');
+emg_bp = filtfilt(b,a,emg);
+
+%% =========================================================
+%% 50 Hz NOTCH
+%% =========================================================
+
+wo = 50/(fs/2);
+bw = wo/35;
+
+[bn,an] = iirnotch(wo,bw);
+
+emg1 = filtfilt(bn,an,emg_bp);
+
+%% =========================================================
+%% 100 Hz NOTCH
+%% =========================================================
+
+wo = 100/(fs/2);
+bw = wo/60;
+
+[bn,an] = iirnotch(wo,bw);
+
+emg_clean = filtfilt(bn,an,emg1);
+
+%% =========================================================
+%% RECTIFICATION
+%% =========================================================
+
+emg_rect = abs(emg_clean);
+
+%% =========================================================
+%% RMS ENVELOPE
+%% =========================================================
+
+win = round(0.05*fs);
+
+emg_env = sqrt(movmean(emg_rect.^2, win));
+
+%% =========================================================
+%% PLOTS
+%% =========================================================
+
+figure
+
+subplot(4,1,1)
+plot(t,emg)
+title("Raw EMG (Live)")
+ylabel("mV")
+grid on
+
+subplot(4,1,2)
+plot(t,emg_clean)
+title("Filtered EMG")
+ylabel("mV")
+grid on
+
+subplot(4,1,3)
+plot(t,emg_rect)
+title("Rectified EMG")
+ylabel("mV")
+grid on
+
+subplot(4,1,4)
+plot(t,emg_env,'LineWidth',1.5)
+title("RMS Envelope")
+xlabel("Time (s)")
+ylabel("mV RMS")
+grid on
+
+%% =========================================================
+%% SAVE FILE
+%% =========================================================
+
+save("emg_processed_live.mat","emg_env","fs","t")
+
+end

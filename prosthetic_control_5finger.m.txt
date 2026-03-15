@@ -1,0 +1,93 @@
+function motor_cmd = prosthetic_control_5finger(emg_env, fs, t, TH, send_to_arduino)
+% =========================================================
+% 5-FINGER PROSTHETIC CONTROL FUNCTION
+%
+% Inputs:
+%   emg_env         → RMS EMG envelope (mV)
+%   fs              → sampling frequency (Hz)
+%   t               → time vector (s)
+%   TH              → threshold (0–1 scale)
+%   send_to_arduino → true / false
+%
+% Output:
+%   motor_cmd       → normalized motor command (0–1)
+% =========================================================
+
+%% -------- NORMALIZE EMG --------
+emg_norm = emg_env ./ max(emg_env + eps);
+
+%% -------- HISTOGRAM (OPTIONAL FOR ANALYSIS) --------
+figure;
+histogram(emg_norm, 100);
+title('Histogram of Normalized EMG');
+xlabel('Normalized EMG (0–1)');
+ylabel('Count');
+grid on;
+
+%% -------- SMOOTH EMG SIGNAL --------
+% remove spikes and noise
+emg_smooth = movmean(emg_norm, round(0.15*fs));   % 150 ms window
+emg_smooth = movmean(emg_smooth, round(0.25*fs)); % additional smoothing
+
+%% -------- BINARY THRESHOLD CONTROL --------
+motor_cmd = zeros(size(emg_smooth));
+
+motor_cmd(emg_smooth > TH) = 1;
+
+
+%% -------- STABILITY FILTER (ANTI-CHATTER) --------
+motor_cmd = movmean(motor_cmd, round(0.2*fs));
+motor_cmd = motor_cmd > 0.5;
+
+
+%% =========================================================
+%% VISUALIZATION
+%% =========================================================
+figure;
+
+subplot(2,1,1)
+plot(t,emg_norm,'LineWidth',1.2)
+hold on
+yline(TH,'r--','Threshold')
+title('Normalized EMG')
+ylabel('Activation')
+grid on
+
+subplot(2,1,2)
+plot(t,motor_cmd,'LineWidth',1.5)
+title('Motor Command (0–1)')
+xlabel('Time (s)')
+ylabel('Command')
+grid on
+
+%% =========================================================
+%% OPTIONAL: SEND TO ARDUINO
+%% =========================================================
+
+if send_to_arduino
+
+    port = "COM14";   % CHANGE if needed
+    baud = 115200;
+
+    s = serialport(port, baud);
+    pause(2);
+
+    disp("Streaming EMG to Arduino UNO...");
+
+    for i = 1:length(motor_cmd)
+
+        val = motor_cmd(i);
+
+        cmd = sprintf("%d", val);
+
+writeline(s, cmd);
+
+
+        pause(1/fs);
+    end
+
+    clear s
+    disp("Done.");
+end
+
+end
